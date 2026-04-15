@@ -24,15 +24,6 @@ El bot está estructurado de forma modular:
 - `cache.py`: Mantiene una copia local de la configuración y umbrales para reducir la carga en la DB.
 - `config.py`: Centraliza constantes y parámetros del sistema (tiempos de espera, IDs de Telegram).
 
-## 📦 Despliegue
-
-El proyecto incluye un script de automatización para desplegar en el VPS:
-
-```bash
-python deploy_bot.py
-```
-
-Este script empaqueta los archivos necesarios, los sube al servidor remoto via SFTP, instala dependencias y reinicia el servicio de `systemd`.
 
 ## ⚙️ Configuración
 
