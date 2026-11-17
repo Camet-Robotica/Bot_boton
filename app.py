@@ -24,10 +24,11 @@ def main() -> None:
     # 2. Hilo demonio que refresca el caché cada hora
     cache.iniciar_refresco_periodico()
 
-    # 3. Restaurar cronómetros pendientes en estado 1 y reconexiones pendientes
+    # 3. Restaurar cronómetros, reconexiones y periodos de gracia pendientes
     import processors
     processors.rehidratar_timers()
     processors.rehidratar_clientes()
+    processors.rehidratar_desconexiones()
 
     # 4. Bucle principal de escucha (bloqueante)
     listener.escuchar()

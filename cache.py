@@ -3,16 +3,16 @@
 import logging
 import threading
 import time
+from contextlib import closing
 
-import psycopg2
 from db import get_connection
-from config import CACHE_TTL_SEGUNDOS
+from config import CACHE_TTL_SEGUNDOS, NORMALIZACION_ESPERA, UMBRAL_ID_NORMALIZACION
 
 log = logging.getLogger(__name__)
 
 _cache_sensores:    dict[int, dict] = {}   # sensor_id   → {sensor_id, sensor_name, sensor_type}
 _cache_componentes: dict[int, dict] = {}   # hardware_id → {hardware_id, hardware_type}
-_cache_umbrales:    dict[int, int] = {}   # umbral_id   → {umbral_id, sensor_id, umbral_max}
+_cache_umbrales:    dict[int, dict] = {}   # umbral_id   → {umbral_id, sensor_id, umbral_max}
 _lock = threading.Lock()
 
 
@@ -20,7 +20,7 @@ def cargar() -> None:
     """Descarga sensor y componente de la DB y los guarda en memoria."""
     global _cache_sensores, _cache_componentes, _cache_umbrales
     try:
-        with get_connection() as conn:
+        with closing(get_connection()) as conn:
             with conn.cursor() as cur:
                 cur.execute("SELECT sensor_id, sensor_name, sensor_type FROM sensor;")
                 cols = [d.name for d in cur.description]
@@ -59,6 +59,21 @@ def get_umbral(umbral_id) -> float | None:
     with _lock:
         entrada = _cache_umbrales.get(umbral_id)
         return entrada["umbral_max"] if entrada else None
+
+
+def get_espera_normalizacion() -> int:
+    """
+    Segundos que un parámetro debe mantenerse estable para declararlo normalizado.
+
+    Sale de la tabla `umbrales` (UMBRAL_ID_NORMALIZACION). Si ese registro no
+    existe, está vacío o no es un número válido, cae en NORMALIZACION_ESPERA.
+    Siempre retorna un entero positivo: nunca None.
+    """
+    try:
+        segundos = int(get_umbral(UMBRAL_ID_NORMALIZACION))
+    except (TypeError, ValueError):
+        segundos = 0
+    return segundos if segundos > 0 else NORMALIZACION_ESPERA
 
 
 def iniciar_refresco_periodico() -> None:
