@@ -202,7 +202,7 @@ def procesar_reconexion(datos: dict) -> None:
     else:
         log.error(
             "No se pudo enviar la reconexión de '%s': la alerta queda abierta "
-            "y se reintentará en el próximo arranque.", cliente
+            "y se reintenta en la próxima vuelta de reintentos.", cliente
         )
 
 
@@ -314,6 +314,28 @@ def rehidratar_clientes() -> None:
 
     if rehidratados > 0:
         log.info("✅ Se han rehidratado y notificado %d reconexiones de clientes pendientes.", rehidratados)
+
+
+def reintentar_reconexiones_pendientes(antiguedad_min: float = 300) -> None:
+    """
+    Reintenta las reconexiones cuyo mensaje no salió (alerta=1 con fin_desconexion).
+
+    Corre cada tanto mientras el bot está andando, así un envío que falló no
+    espera al próximo reinicio. Sólo toma las que se cerraron hace más de
+    `antiguedad_min` segundos, para no pisarse con el aviso que el bot está
+    mandando en ese momento.
+    """
+    pendientes = db.obtener_alertas_clientes_pendientes()
+    if not pendientes:
+        return
+
+    ahora_utc = datetime.now(timezone.utc)
+    for row in pendientes:
+        fin = _a_datetime_utc(row.get("fin_desconexion"))
+        if fin is None or (ahora_utc - fin).total_seconds() < antiguedad_min:
+            continue
+        log.info("🔁 Reintento: reconexión de '%s' pendiente desde %s.", row.get("cliente"), fin.isoformat())
+        procesar_reconexion(row)
 
 
 def rehidratar_desconexiones() -> None:
