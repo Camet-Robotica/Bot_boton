@@ -41,10 +41,15 @@ def _despachar(canal: str, payload_raw: str) -> None:
         return
 
     handler = _CANAL_HANDLERS.get(canal)
-    if handler:
-        handler(datos)
-    else:
+    if not handler:
         log.warning("Canal desconocido: %s", canal)
+        return
+
+    try:
+        handler(datos)
+    except Exception:
+        # Un payload raro no debe tirar abajo la conexión LISTEN/NOTIFY.
+        log.exception("Error procesando notificación de %s: %.300s", canal, payload_raw)
 
 
 def escuchar() -> None:

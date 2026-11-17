@@ -1,7 +1,7 @@
 """formatters.py — Construcción de mensajes para el bot de Telegram."""
 
 from datetime import datetime, timezone, timedelta
-from cache import get_sensor, get_componente, get_umbral
+from cache import get_sensor, get_componente, get_espera_normalizacion
 
 # Zona horaria Argentina (UTC-3)
 _AR = timezone(timedelta(hours=-3))
@@ -22,13 +22,26 @@ def fmt_timestamp(ts) -> str:
     if not ts:
         return ""
     try:
-        dt = datetime.fromisoformat(str(ts))
+        dt = ts if isinstance(ts, datetime) else datetime.fromisoformat(str(ts))
         # Si no tiene tz, asumimos UTC (el VPS corre en UTC)
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
         return dt.astimezone(_AR).strftime("%d/%m/%Y %H:%M:%S")
     except Exception:
         return str(ts)
+
+
+def fmt_numero(valor, decimales: int = 2, vacio: str = "s/d") -> str:
+    """
+    Formatea un valor numérico con N decimales sin romperse si llega como
+    texto, None o vacío: el payload del NOTIFY no siempre trae el tipo esperado.
+    """
+    if valor is None or valor == "":
+        return vacio
+    try:
+        return f"{float(valor):.{decimales}f}"
+    except (TypeError, ValueError):
+        return str(valor)
 
 
 # ── Mensajes de clientes ──────────────────────────────────────────────────────
@@ -82,7 +95,7 @@ def _enriquecer_componente(datos: dict) -> tuple[str, str, str]:
 
 def msg_umbral_superado(datos: dict) -> str:
     nombre_cliente, nombre_hw, sensor_str = _enriquecer_componente(datos)
-    valor = datos.get("value", datos.get("valor", ""))
+    valor = fmt_numero(datos.get("value", datos.get("valor")))
     ts    = fmt_timestamp(datos.get("timestamp", ""))
 
     return "\n".join([
@@ -90,7 +103,7 @@ def msg_umbral_superado(datos: dict) -> str:
         f"• Cliente:    `{nombre_cliente}`",
         f"• Componente: `{nombre_hw}`",
         f"• Sensor:     `{sensor_str}`",
-        f"• Valor:      `{valor:.2f}`",
+        f"• Valor:      `{valor}`",
         f"• Hora:       `{ts}`",
     ])
 
@@ -98,13 +111,14 @@ def msg_umbral_superado(datos: dict) -> str:
 def msg_normalizado(datos: dict) -> str:
     nombre_cliente, nombre_hw, sensor_str = _enriquecer_componente(datos)
     ts = fmt_timestamp(datos.get("timestamp", ""))
+    minutos = get_espera_normalizacion() / 60
 
     return "\n".join([
         "✅ *Parámetro Normalizado*",
         f"• Cliente:    `{nombre_cliente}`",
         f"• Componente: `{nombre_hw}`",
         f"• Sensor:     `{sensor_str}`",
-        f"• El valor se estabilizó durante {get_umbral(999)/60} minutos sin superar el umbral.",
+        f"• El valor se estabilizó durante {minutos:g} minutos sin superar el umbral.",
         f"• Hora:       `{ts}`",
     ])
 
@@ -112,14 +126,14 @@ def msg_normalizado(datos: dict) -> str:
 def msg_ventilador_cpu_bajo(datos: dict) -> str:
     nombre_cliente = fmt_cliente(datos.get("cliente", "Desconocido"))
     ts = fmt_timestamp(datos.get("timestamp", ""))
-    rpm = datos.get("rpm", 0)
+    rpm = fmt_numero(datos.get("rpm"))
     min_rpm = datos.get("min_rpm", 1500)
 
     return "\n".join([
         "🚨 *Alerta Crítica: Ventilador de CPU*",
         f"• Cliente:    `{nombre_cliente}`",
         f"• Hora:       `{ts}`",
-        f"• Velocidad:  `{rpm:.2f} RPM`",
+        f"• Velocidad:  `{rpm} RPM`",
         f"• Mínimo esperado:    `{min_rpm} RPM`",
         "",
         "⚠️ El ventilador del CPU está funcionando por debajo de los parámetros normales.",
