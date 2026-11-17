@@ -6,6 +6,7 @@ import threading
 from datetime import datetime, timezone, timedelta
 
 import cache
+import config
 import db
 import sender
 import formatters
@@ -21,6 +22,11 @@ from config import (
 log = logging.getLogger(__name__)
 
 _AR = timezone(timedelta(hours=-3))
+
+# Una normalización o una reconexión que quedó sin avisar y es más vieja que esto
+# (segundos) ya no se manda: se cierra en la DB sin mensaje. Evita que un reinicio
+# del bot mande avisos de hace horas o días.
+ALERTA_VIEJA_SEGUNDOS = getattr(config, "ALERTA_VIEJA_SEGUNDOS", 1800)
 
 # ── Timer de normalización ────────────────────────────────────────────────────
 # Clave: (cliente, hardware_id, sensor_id)
@@ -279,7 +285,10 @@ def rehidratar_timers() -> None:
             "timestamp": ultimo_ts.isoformat()
         }
 
-        if tiempo_restante <= 0:
+        if -tiempo_restante > ALERTA_VIEJA_SEGUNDOS:
+            log.info("🗄️  Rehidratación: normalización vieja de %s (pasaron %d s): se cierra sin avisar.", key, int(tiempo_transcurrido))
+            db.cerrar_alerta_componente(datos_simulados)
+        elif tiempo_restante <= 0:
             log.info("⌛ Rehidratación: Normalización atrasada enviada para %s (pasaron %d s)", key, int(tiempo_transcurrido))
             _on_normalizacion(key, datos_simulados)
         else:
@@ -304,6 +313,8 @@ def rehidratar_clientes() -> None:
 
     rehidratados = 0
     for row in pendientes:
+        if _reconexion_vieja(row):
+            continue
         # Si el cliente ya tiene un fin_desconexion, significa que se reconectó
         # pero el bot no estaba online para enviar el mensaje y cerrar la alerta.
         if row.get("fin_desconexion"):
@@ -314,6 +325,19 @@ def rehidratar_clientes() -> None:
 
     if rehidratados > 0:
         log.info("✅ Se han rehidratado y notificado %d reconexiones de clientes pendientes.", rehidratados)
+
+
+def _reconexion_vieja(row: dict) -> bool:
+    """Si la reconexión pendiente es más vieja que ALERTA_VIEJA_SEGUNDOS, la cierra sin avisar."""
+    fin = _a_datetime_utc(row.get("fin_desconexion"))
+    if fin is None:
+        return False
+    antiguedad = (datetime.now(timezone.utc) - fin).total_seconds()
+    if antiguedad <= ALERTA_VIEJA_SEGUNDOS:
+        return False
+    log.info("🗄️  Reconexión vieja de '%s' (hace %d s): se cierra sin avisar.", row.get("cliente"), int(antiguedad))
+    db.cerrar_alerta_cliente(row)
+    return True
 
 
 def reintentar_reconexiones_pendientes(antiguedad_min: float = 300) -> None:
@@ -333,6 +357,8 @@ def reintentar_reconexiones_pendientes(antiguedad_min: float = 300) -> None:
     for row in pendientes:
         fin = _a_datetime_utc(row.get("fin_desconexion"))
         if fin is None or (ahora_utc - fin).total_seconds() < antiguedad_min:
+            continue
+        if _reconexion_vieja(row):
             continue
         log.info("🔁 Reintento: reconexión de '%s' pendiente desde %s.", row.get("cliente"), fin.isoformat())
         procesar_reconexion(row)
